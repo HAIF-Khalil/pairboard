@@ -41,13 +41,13 @@ export interface BoardState {
 declare global {
   interface Window {
     modelContext?: {
-      registerTool: (config: ToolConfig) => void;
+      registerTool: (config: ToolConfig, options?: { signal?: AbortSignal }) => void;
     };
   }
   
   interface Document {
     modelContext?: {
-      registerTool: (config: ToolConfig) => void;
+      registerTool: (config: ToolConfig, options?: { signal?: AbortSignal }) => void;
     };
   }
 }
@@ -55,7 +55,7 @@ declare global {
 export interface ToolConfig {
   name: string;
   description: string;
-  parameters?: {
+  inputSchema?: {
     type: 'object';
     properties: Record<string, unknown>;
     required?: string[];
@@ -63,6 +63,5 @@ export interface ToolConfig {
   annotations?: {
     readOnlyHint?: boolean;
   };
-  handler: (args: Record<string, unknown>) => Promise<unknown> | unknown;
-  signal?: AbortSignal;
+  execute: (args: Record<string, unknown>) => Promise<unknown> | unknown;
 }

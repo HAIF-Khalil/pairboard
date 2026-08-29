@@ -155,7 +155,20 @@ body {
 .card.pending {
   border-color: #ff9800;
   border-style: dashed;
-  opacity: 0.7;
+  opacity: 0.8;
+}
+
+.card.pending-add {
+  background: #fff8e1;
+}
+
+.pending-indicator {
+  font-size: 11px;
+  color: #e65100;
+  font-weight: 600;
+  margin-top: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .card-title {

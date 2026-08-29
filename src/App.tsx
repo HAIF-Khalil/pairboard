@@ -1,20 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { BoardState, Card, Column, PendingDraft } from './types';
-import { loadState, saveState, addActivity } from './state';
-import { initializeWebMCP, updateSelectedCard, isWebMCPAvailable } from './webmcp';
+import { loadState, saveState } from './state';
+import { initializeWebMCP, updateSelectedCard, applyDraft, rejectDraft, isWebMCPAvailable } from './webmcp';
 import './App.css';
 
 function App() {
   const [state, setState] = useState<BoardState>(loadState);
   const [webmcpAvailable] = useState(isWebMCPAvailable());
 
-  useEffect(() => {
-    initializeWebMCP(() => state, () => {
-      const newState = loadState();
-      setState(newState);
-      saveState(newState);
-    });
+  const getState = useCallback(() => state, [state]);
+
+  const setStateAndSave = useCallback((newState: BoardState) => {
+    setState(newState);
+    saveState(newState);
   }, []);
+
+  useEffect(() => {
+    initializeWebMCP(getState, setStateAndSave);
+  }, [getState, setStateAndSave]);
 
   useEffect(() => {
     saveState(state);
@@ -26,115 +29,42 @@ function App() {
   };
 
   const handleConfirmDraft = (draftId: string) => {
-    setState(prev => {
-      const draftIndex = prev.pendingDrafts.findIndex(d => d.id === draftId);
-      if (draftIndex === -1) return prev;
-
-      const draft = prev.pendingDrafts[draftIndex];
-      const newState = { ...prev };
-
-      switch (draft.type) {
-        case 'add_card':
-          if (draft.data.card) {
-            const newCard: Card = {
-              id: `card-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              ...draft.data.card
-            };
-            newState.cards = [...newState.cards, newCard];
-            addActivity(newState, newState.currentOperator, 'confirmed add', newCard.title);
-          }
-          break;
-
-        case 'move_card':
-          if (draft.data.cardId && draft.data.toColumn) {
-            const cardIndex = newState.cards.findIndex(c => c.id === draft.data.cardId);
-            if (cardIndex !== -1) {
-              const oldColumn = newState.cards[cardIndex].column;
-              newState.cards = [...newState.cards];
-              newState.cards[cardIndex] = {
-                ...newState.cards[cardIndex],
-                column: draft.data.toColumn
-              };
-              addActivity(newState, newState.currentOperator, 'confirmed move', `from ${oldColumn} to ${draft.data.toColumn}`);
-            }
-          }
-          break;
-
-        case 'assign_card':
-          if (draft.data.cardId) {
-            const cardIndex = newState.cards.findIndex(c => c.id === draft.data.cardId);
-            if (cardIndex !== -1) {
-              newState.cards = [...newState.cards];
-              newState.cards[cardIndex] = {
-                ...newState.cards[cardIndex],
-                assignee: draft.data.assignee || null
-              };
-              addActivity(newState, newState.currentOperator, 'confirmed assign', draft.data.assignee || 'unassigned');
-            }
-          }
-          break;
-
-        case 'propose_plan':
-          if (draft.data.cards) {
-            const newCards = draft.data.cards.map(cardData => {
-              const { id: _id, ...rest } = cardData as Card;
-              return {
-                id: `card-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                ...rest
-              };
-            });
-            newState.cards = [...newState.cards, ...newCards];
-          }
-          if (draft.data.moves) {
-            newState.cards = newState.cards.map(card => {
-              const move = draft.data.moves?.find(m => m.cardId === card.id);
-              if (move) {
-                return { ...card, column: move.toColumn };
-              }
-              return card;
-            });
-          }
-          addActivity(newState, newState.currentOperator, 'confirmed plan', `${draft.data.cards?.length || 0} cards, ${draft.data.moves?.length || 0} moves`);
-          break;
-      }
-
-      newState.pendingDrafts = newState.pendingDrafts.filter(d => d.id !== draftId);
-      return newState;
-    });
+    const newState = applyDraft(state, draftId);
+    setState(newState);
+    saveState(newState);
   };
 
   const handleRejectDraft = (draftId: string) => {
-    setState(prev => {
-      const draft = prev.pendingDrafts.find(d => d.id === draftId);
-      if (!draft) return prev;
-
-      const newState = { ...prev };
-      let details = '';
-
-      switch (draft.type) {
-        case 'add_card':
-          details = draft.data.card?.title || 'card';
-          break;
-        case 'move_card':
-          const card = newState.cards.find(c => c.id === draft.data.cardId);
-          details = card?.title || 'card';
-          break;
-        case 'assign_card':
-          const assignCard = newState.cards.find(c => c.id === draft.data.cardId);
-          details = assignCard?.title || 'card';
-          break;
-        case 'propose_plan':
-          details = 'plan';
-          break;
-      }
-
-      addActivity(newState, newState.currentOperator, 'rejected', details);
-      newState.pendingDrafts = newState.pendingDrafts.filter(d => d.id !== draftId);
-      return newState;
-    });
+    const newState = rejectDraft(state, draftId);
+    setState(newState);
+    saveState(newState);
   };
 
   const columns: Column[] = ['Now', 'Next', 'Blocked', 'Done'];
+
+  // Get pending drafts for a specific card or column
+  const getPendingDraftsForCard = (cardId: string): PendingDraft[] => {
+    return state.pendingDrafts.filter(d => 
+      (d.type === 'move_card' || d.type === 'assign_card') && d.data.cardId === cardId
+    );
+  };
+
+  const getPendingAddDraftsForColumn = (column: Column): PendingDraft[] => {
+    return state.pendingDrafts.filter(d => 
+      d.type === 'add_card' && d.data.card?.column === column
+    );
+  };
+
+  const getPlanDraftsAffectingColumn = (column: Column): PendingDraft[] => {
+    return state.pendingDrafts.filter(d => {
+      if (d.type === 'propose_plan') {
+        const hasCardsInColumn = d.data.cards?.some(c => c.column === column);
+        const hasMovesToColumn = d.data.moves?.some(m => m.toColumn === column);
+        return hasCardsInColumn || hasMovesToColumn;
+      }
+      return false;
+    });
+  };
 
   return (
     <div className="app">
@@ -163,34 +93,71 @@ function App() {
           <div className="board">
             {columns.map(column => {
               const columnCards = state.cards.filter(c => c.column === column);
+              const pendingAdds = getPendingAddDraftsForColumn(column);
+              const planDrafts = getPlanDraftsAffectingColumn(column);
+              
               return (
                 <div key={column} className="column">
                   <div className="column-header">
                     {column}
                     <span className="column-count">{columnCards.length}</span>
                   </div>
-                  {columnCards.map(card => (
-                    <div
-                      key={card.id}
-                      className={`card ${state.selectedCardId === card.id ? 'selected' : ''}`}
-                      onClick={() => handleSelectCard(state.selectedCardId === card.id ? null : card.id)}
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          handleSelectCard(state.selectedCardId === card.id ? null : card.id);
-                        }
-                      }}
-                      aria-pressed={state.selectedCardId === card.id}
-                    >
-                      <div className="card-title">{card.title}</div>
-                      <div className="card-description">{card.description}</div>
-                      {card.assignee && (
-                        <div className="card-assignee">{card.assignee}</div>
+                  
+                  {columnCards.map(card => {
+                    const cardPendingDrafts = getPendingDraftsForCard(card.id);
+                    const hasPendingDrafts = cardPendingDrafts.length > 0;
+                    
+                    return (
+                      <div
+                        key={card.id}
+                        className={`card ${state.selectedCardId === card.id ? 'selected' : ''} ${hasPendingDrafts ? 'pending' : ''}`}
+                        onClick={() => handleSelectCard(state.selectedCardId === card.id ? null : card.id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            handleSelectCard(state.selectedCardId === card.id ? null : card.id);
+                          }
+                        }}
+                        aria-pressed={state.selectedCardId === card.id}
+                      >
+                        <div className="card-title">{card.title}</div>
+                        <div className="card-description">{card.description}</div>
+                        {card.assignee && (
+                          <div className="card-assignee">{card.assignee}</div>
+                        )}
+                        {hasPendingDrafts && (
+                          <div className="pending-indicator">⏳ Pending changes</div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {pendingAdds.map(draft => (
+                    <div key={draft.id} className="card pending pending-add">
+                      <div className="card-title">{draft.data.card?.title}</div>
+                      <div className="card-description">{draft.data.card?.description}</div>
+                      {draft.data.card?.assignee && (
+                        <div className="card-assignee">{draft.data.card.assignee}</div>
                       )}
+                      <div className="pending-indicator">⏳ Pending add</div>
                     </div>
                   ))}
+
+                  {planDrafts.map(draft => {
+                    const cardsForColumn = draft.data.cards?.filter(c => c.column === column) || [];
+                    return cardsForColumn.map((card, idx) => (
+                      <div key={`${draft.id}-${idx}`} className="card pending pending-add">
+                        <div className="card-title">{card.title}</div>
+                        <div className="card-description">{card.description}</div>
+                        {card.assignee && (
+                          <div className="card-assignee">{card.assignee}</div>
+                        )}
+                        <div className="pending-indicator">⏳ Pending (plan)</div>
+                      </div>
+                    ));
+                  })}
                 </div>
               );
             })}
