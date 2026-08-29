@@ -4,6 +4,7 @@ import { getCard, getBlockedCards, addActivity, saveState, generateCardId } from
 let getState: () => BoardState;
 let setState: (state: BoardState) => void;
 let selectedCardAbortController: AbortController | null = null;
+let boardLevelToolsRegistered = false;
 
 export function initializeWebMCP(
   getStateFn: () => BoardState,
@@ -17,7 +18,11 @@ export function initializeWebMCP(
     return;
   }
 
-  registerBoardLevelTools();
+  // Guard against double registration in StrictMode
+  if (!boardLevelToolsRegistered) {
+    registerBoardLevelTools();
+    boardLevelToolsRegistered = true;
+  }
 }
 
 export function updateSelectedCard(cardId: string | null): void {
@@ -41,18 +46,13 @@ function registerBoardLevelTools(): void {
     annotations: { readOnlyHint: true },
     execute: async () => {
       const state = getState();
-      const newState = { ...state };
-      addActivity(newState, 'Agent', 'read board', 'viewed board state');
-      setState(newState);
-      saveState(newState);
-      
-      const blockedCards = getBlockedCards(newState);
+      const blockedCards = getBlockedCards(state);
       return {
         columns: ['Now', 'Next', 'Blocked', 'Done'],
-        cards: newState.cards,
-        pendingDrafts: newState.pendingDrafts,
+        cards: state.cards,
+        pendingDrafts: state.pendingDrafts,
         blockedCards: blockedCards,
-        selectedCardId: newState.selectedCardId
+        selectedCardId: state.selectedCardId
       };
     }
   });
@@ -228,10 +228,6 @@ function registerSelectedCardTools(signal: AbortSignal): void {
       if (!card) {
         return { error: 'Selected card not found' };
       }
-      const newState = { ...state, activityLog: state.activityLog.slice() };
-      addActivity(newState, 'Agent', 'read card', card.title);
-      setState(newState);
-      saveState(newState);
       return card;
     }
   }, { signal });
