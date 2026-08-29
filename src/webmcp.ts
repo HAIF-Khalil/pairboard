@@ -90,7 +90,7 @@ function registerBoardLevelTools(): void {
         pendingDrafts: [...state.pendingDrafts, draft],
         activityLog: state.activityLog.slice()
       };
-      addActivity(newState, 'Agent', 'proposed add_card', String(args.title));
+      addActivity(newState, 'Agent', 'proposed adding', String(args.title));
       setState(newState);
       saveState(newState);
       return { status: 'pending', draftId: draft.id, message: 'Card proposed, awaiting confirmation' };
@@ -147,7 +147,7 @@ function registerBoardLevelTools(): void {
       };
       const cardsCount = draft.data.cards?.length || 0;
       const movesCount = draft.data.moves?.length || 0;
-      addActivity(newState, 'Agent', 'proposed plan', `${cardsCount} cards, ${movesCount} moves`);
+      addActivity(newState, 'Agent', 'proposed a plan', `${cardsCount} cards, ${movesCount} moves`);
       setState(newState);
       saveState(newState);
       return { status: 'pending', draftId: draft.id, message: 'Plan proposed, awaiting confirmation' };
@@ -189,20 +189,22 @@ function registerBoardLevelTools(): void {
         switch (draft.type) {
           case 'add_card':
             details = draft.data.card?.title || 'card';
+            addActivity(newState, state.currentOperator, 'rejected adding', details);
             break;
           case 'move_card':
             const card = getCard(newState, draft.data.cardId || '');
             details = card?.title || 'card';
+            addActivity(newState, state.currentOperator, 'rejected a move', details);
             break;
           case 'assign_card':
             const assignCard = getCard(newState, draft.data.cardId || '');
             details = assignCard?.title || 'card';
+            addActivity(newState, state.currentOperator, 'rejected an assignment', details);
             break;
           case 'propose_plan':
-            details = 'plan';
+            addActivity(newState, state.currentOperator, 'rejected a plan', `${draft.data.cards?.length || 0} cards, ${draft.data.moves?.length || 0} moves`);
             break;
         }
-        addActivity(newState, state.currentOperator, 'rejected', details);
         newState.pendingDrafts = newState.pendingDrafts.filter(d => d.id !== draftId);
         setState(newState);
         saveState(newState);
@@ -266,7 +268,7 @@ function registerSelectedCardTools(signal: AbortSignal): void {
         pendingDrafts: [...state.pendingDrafts, draft],
         activityLog: state.activityLog.slice()
       };
-      addActivity(newState, 'Agent', 'proposed move_card', `"${card.title}" to ${args.toColumn}`);
+      addActivity(newState, 'Agent', 'proposed moving', `"${card.title}" to ${args.toColumn}`);
       setState(newState);
       saveState(newState);
       return { status: 'pending', draftId: draft.id, message: 'Move proposed, awaiting confirmation' };
@@ -307,7 +309,7 @@ function registerSelectedCardTools(signal: AbortSignal): void {
         pendingDrafts: [...state.pendingDrafts, draft],
         activityLog: state.activityLog.slice()
       };
-      addActivity(newState, 'Agent', 'proposed assign_card', `"${card.title}" to ${args.assignee}`);
+      addActivity(newState, 'Agent', 'proposed assigning', `"${card.title}" to ${args.assignee}`);
       setState(newState);
       saveState(newState);
       return { status: 'pending', draftId: draft.id, message: 'Assignment proposed, awaiting confirmation' };
@@ -326,7 +328,7 @@ function applyDraftToState(state: BoardState, draft: PendingDraft): BoardState {
           ...draft.data.card
         };
         newState.cards.push(newCard);
-        addActivity(newState, state.currentOperator, 'confirmed add', newCard.title);
+        addActivity(newState, state.currentOperator, 'confirmed adding', newCard.title);
       }
       break;
 
@@ -339,7 +341,7 @@ function applyDraftToState(state: BoardState, draft: PendingDraft): BoardState {
             ...newState.cards[cardIndex],
             column: draft.data.toColumn
           };
-          addActivity(newState, state.currentOperator, 'confirmed move', `from ${oldColumn} to ${draft.data.toColumn}`);
+          addActivity(newState, state.currentOperator, 'confirmed moving', `"${newState.cards[cardIndex].title}" from ${oldColumn} to ${draft.data.toColumn}`);
         }
       }
       break;
@@ -352,7 +354,7 @@ function applyDraftToState(state: BoardState, draft: PendingDraft): BoardState {
             ...newState.cards[cardIndex],
             assignee: draft.data.assignee || null
           };
-          addActivity(newState, state.currentOperator, 'confirmed assign', draft.data.assignee || 'unassigned');
+          addActivity(newState, state.currentOperator, 'confirmed assigning', `"${newState.cards[cardIndex].title}" to ${draft.data.assignee || 'unassigned'}`);
         }
       }
       break;
@@ -377,7 +379,7 @@ function applyDraftToState(state: BoardState, draft: PendingDraft): BoardState {
           return card;
         });
       }
-      addActivity(newState, state.currentOperator, 'confirmed plan', `${draft.data.cards?.length || 0} cards, ${draft.data.moves?.length || 0} moves`);
+      addActivity(newState, state.currentOperator, 'confirmed a plan', `${draft.data.cards?.length || 0} cards, ${draft.data.moves?.length || 0} moves`);
       break;
   }
 
@@ -401,25 +403,23 @@ export function rejectDraft(state: BoardState, draftId: string): BoardState {
   const draft = state.pendingDrafts[draftIndex];
   const newState = { ...state, activityLog: state.activityLog.slice() };
   
-  let details = '';
   switch (draft.type) {
     case 'add_card':
-      details = draft.data.card?.title || 'card';
+      addActivity(newState, state.currentOperator, 'rejected adding', draft.data.card?.title || 'card');
       break;
     case 'move_card':
       const card = getCard(state, draft.data.cardId || '');
-      details = card?.title || 'card';
+      addActivity(newState, state.currentOperator, 'rejected a move', card?.title || 'card');
       break;
     case 'assign_card':
       const assignCard = getCard(state, draft.data.cardId || '');
-      details = assignCard?.title || 'card';
+      addActivity(newState, state.currentOperator, 'rejected an assignment', assignCard?.title || 'card');
       break;
     case 'propose_plan':
-      details = 'plan';
+      addActivity(newState, state.currentOperator, 'rejected a plan', `${draft.data.cards?.length || 0} cards, ${draft.data.moves?.length || 0} moves`);
       break;
   }
 
-  addActivity(newState, state.currentOperator, 'rejected', details);
   newState.pendingDrafts = newState.pendingDrafts.filter(d => d.id !== draftId);
   return newState;
 }
